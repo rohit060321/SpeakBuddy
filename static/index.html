@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+content="width=device-width, initial-scale=1.0">
+
+<title>SpeakBuddy</title>
+
+<link rel="stylesheet"
+href="/static/style.css">
+
+</head>
+
+
+<body>
+
+
+<div class="app">
+
+
+<header>
+
+<div>
+
+<h1>SpeakBuddy</h1>
+
+<p>
+Your private AI practice partner.
+</p>
+
+</div>
+
+
+<div class="badges">
+
+<span class="local">
+● Gemma
+</span>
+
+<span class="cloud">
+● Voice
+</span>
+
+</div>
+
+</header>
+
+
+<main>
+
+
+<section class="card">
+
+
+<h2>
+Practice your communication
+</h2>
+
+
+<p class="description">
+
+Practice interviews, presentations
+and everyday conversations with
+your AI partner.
+
+</p>
+
+
+<label>
+Choose a practice mode
+</label>
+
+
+<div class="modes">
+
+
+<button
+class="mode active"
+onclick="changeMode('Interview',this)">
+
+💼 Interview
+
+</button>
+
+
+<button
+class="mode"
+onclick="changeMode('Presentation',this)">
+
+🎤 Presentation
+
+</button>
+
+
+<button
+class="mode"
+onclick="changeMode('Conversation',this)">
+
+💬 Conversation
+
+</button>
+
+
+</div>
+
+
+<div class="question">
+
+<small>
+AI QUESTION
+</small>
+
+
+<h2 id="question">
+
+Tell me about yourself.
+
+</h2>
+
+</div>
+
+
+<label>
+Your answer
+</label>
+
+
+<textarea
+id="answer"
+placeholder="Write your answer here...">
+</textarea>
+
+
+<div class="buttons">
+
+
+<button
+class="analyze"
+onclick="analyze()">
+
+Analyze My Answer →
+
+</button>
+
+
+<button
+class="clear"
+onclick="clearAnswer()">
+
+Clear
+
+</button>
+
+
+</div>
+
+
+</section>
+
+
+<div
+id="loading"
+class="loading">
+
+<div class="spinner"></div>
+
+<p>
+Gemma is analyzing your answer...
+</p>
+
+</div>
+
+
+<section
+id="result"
+class="card result">
+
+
+<div class="result-header">
+
+
+<div>
+
+<small>
+AI FEEDBACK
+</small>
+
+<h2>
+Here's how you did
+</h2>
+
+</div>
+
+
+<div
+id="overall"
+class="overall">
+
+-
+
+</div>
+
+
+</div>
+
+
+<div class="scores">
+
+
+<div class="score">
+
+<strong id="clarity">
+-
+</strong>
+
+<span>
+Clarity
+</span>
+
+</div>
+
+
+<div class="score">
+
+<strong id="grammar">
+-
+</strong>
+
+<span>
+Grammar
+</span>
+
+</div>
+
+
+<div class="score">
+
+<strong id="vocabulary">
+-
+</strong>
+
+<span>
+Vocabulary
+</span>
+
+</div>
+
+
+<div class="score">
+
+<strong id="confidence">
+-
+</strong>
+
+<span>
+Confidence
+</span>
+
+</div>
+
+
+</div>
+
+
+<div class="improve">
+
+<h3>
+💡 What to improve
+</h3>
+
+
+<ul id="suggestions">
+</ul>
+
+
+</div>
+
+
+<div class="next">
+
+
+<small>
+NEXT QUESTION
+</small>
+
+
+<h3 id="followup">
+</h3>
+
+
+<div class="next-buttons">
+
+
+<button
+onclick="nextQuestion()">
+
+Try Next Question →
+
+</button>
+
+
+<button
+id="voiceBtn"
+onclick="speakFeedback()">
+
+🔊 Hear Feedback
+
+</button>
+
+
+</div>
+
+
+</div>
+
+
+</section>
+
+
+<section class="card">
+
+
+<div class="history-header">
+
+<div>
+
+<small>
+YOUR PROGRESS
+</small>
+
+<h2>
+Recent Sessions
+</h2>
+
+</div>
+
+
+<button
+onclick="loadHistory()">
+
+Refresh
+
+</button>
+
+</div>
+
+
+<div id="history">
+
+<p class="muted">
+Complete a practice session
+to see your history.
+</p>
+
+</div>
+
+
+</section>
+
+
+</main>
+
+
+<footer>
+
+Built with open-source AI
+· Gemma + Ollama
+· MongoDB Atlas
+· ElevenLabs
+
+</footer>
+
+
+</div>
+
+
+<script
+src="/static/script.js">
+</script>
+
+
+</body>
+
+</html>
