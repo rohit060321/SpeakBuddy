@@ -23,6 +23,8 @@ app = FastAPI(title="SpeakBuddy")
 MONGODB_URI = os.getenv("MONGODB_URI")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID") or "21m00Tcm4TlvDq8ikWAM"
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # =========================
 # MONGODB (Optional Cloud Storage)
@@ -30,16 +32,21 @@ ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID") or "21m00Tcm4TlvDq8ikWAM"
 mongo_client = None
 sessions_collection = None
 
-if MONGODB_URI:
+if MONGODB_URI and MONGODB_URI.strip():
     try:
         mongo_client = MongoClient(
-            MONGODB_URI,
-            serverSelectionTimeoutMS=4000
+            MONGODB_URI.strip(),
+            serverSelectionTimeoutMS=5000
         )
         mongo_client.admin.command("ping")
-        db = mongo_client["speakbuddy"]
+        try:
+            db = mongo_client.get_default_database()
+        except Exception:
+            db = None
+        if db is None:
+            db = mongo_client["speakbuddy"]
         sessions_collection = db["sessions"]
-        print("MongoDB connected successfully.")
+        print("MongoDB Atlas connected successfully.")
     except Exception as e:
         print("MongoDB connection failed (using local SQLite storage):", e)
         mongo_client = None
@@ -197,12 +204,13 @@ def get_history(limit: int = 10):
 # =========================
 eleven_client = None
 
-if ELEVENLABS_API_KEY:
+if ELEVENLABS_API_KEY and ELEVENLABS_API_KEY.strip():
     try:
-        eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+        eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY.strip())
         print("ElevenLabs client initialized.")
     except Exception as e:
         print("ElevenLabs init failed:", e)
+        eleven_client = None
 
 # =========================
 # REQUEST MODEL
@@ -213,7 +221,7 @@ class PracticeRequest(BaseModel):
     answer: str
 
 # =========================
-# GEMMA LLM INTEGRATION
+# LLM INTEGRATION
 # =========================
 def normalize_feedback(raw: dict) -> dict:
     data = {str(k).lower(): v for k, v in raw.items()}
@@ -244,8 +252,8 @@ def normalize_feedback(raw: dict) -> dict:
 
     if not suggestions:
         suggestions = [
-            "Structure your answer with clear points and examples.",
-            "Maintain a steady, confident speaking pace."
+            "Structure your answer with clear points and concrete examples.",
+            "Maintain a steady, confident speaking pace and natural flow."
         ]
 
     follow_up = str(data.get("follow_up") or data.get("followup") or data.get("next_question") or "").strip()
@@ -257,6 +265,64 @@ def normalize_feedback(raw: dict) -> dict:
         "grammar": grammar,
         "vocabulary": vocabulary,
         "confidence": confidence,
+        "suggestions": suggestions[:2],
+        "follow_up": follow_up
+    }
+
+def heuristic_evaluation(scenario: str, question: str, answer: str) -> dict:
+    words = [w for w in re.findall(r"\b\w+\b", answer.lower()) if w]
+    word_count = len(words)
+    unique_words = len(set(words))
+
+    diversity_ratio = unique_words / max(word_count, 1)
+    vocab_score = min(10, max(5, int(diversity_ratio * 10) + (2 if word_count > 25 else 0)))
+
+    if word_count < 6:
+        clarity_score = 5
+        confidence_score = 5
+    elif word_count < 18:
+        clarity_score = 7
+        confidence_score = 7
+    elif word_count < 90:
+        clarity_score = 8
+        confidence_score = 8
+    else:
+        clarity_score = 7
+        confidence_score = 8
+
+    has_cap = answer[0].isupper() if answer else False
+    has_punct = answer.strip().endswith((".", "!", "?")) if answer else False
+    grammar_score = 8 if (has_cap and has_punct) else 7
+    if word_count > 25 and (has_cap and has_punct):
+        grammar_score = 9
+
+    suggestions = []
+    if word_count < 15:
+        suggestions.append("Give a concrete example to make your answer more convincing and detailed.")
+    else:
+        suggestions.append("Use the STAR method (Situation, Task, Action, Result) to organize your response.")
+
+    if not has_punct or not has_cap:
+        suggestions.append("Frame your points in complete, punchy sentences for stronger impact.")
+    else:
+        suggestions.append("Highlight the outcome or key lesson learned from that experience.")
+
+    q_lower = question.lower()
+    a_lower = answer.lower()
+    if "project" in q_lower or "project" in a_lower:
+        follow_up = "What was the biggest technical hurdle you encountered in that project, and how did you resolve it?"
+    elif "yourself" in q_lower or "background" in q_lower:
+        follow_up = "What specific skills or technologies are you currently most interested in deepening?"
+    elif "challenge" in q_lower:
+        follow_up = "Looking back, is there anything you would do differently if faced with that situation again?"
+    else:
+        follow_up = "Can you share another example where you applied this approach successfully?"
+
+    return {
+        "clarity": clarity_score,
+        "grammar": grammar_score,
+        "vocabulary": vocab_score,
+        "confidence": confidence_score,
         "suggestions": suggestions[:2],
         "follow_up": follow_up
     }
@@ -303,34 +369,59 @@ Format:
 }}
 """
 
-    response = requests.post(
-        "http://127.0.0.1:11434/api/generate",
-        json={
-            "model": "gemma3:1b",
-            "prompt": prompt,
-            "stream": False,
-            "format": "json"
-        },
-        timeout=120
-    )
+    # 1. Try Groq Cloud if configured
+    if GROQ_API_KEY and GROQ_API_KEY.strip():
+        try:
+            res = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY.strip()}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "gemma2-9b-it",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.7
+                },
+                timeout=25
+            )
+            if res.ok:
+                content = res.json()["choices"][0]["message"]["content"]
+                parsed = json.loads(content)
+                return normalize_feedback(parsed)
+        except Exception as e:
+            print("Groq cloud inference error:", e)
 
-    response.raise_for_status()
-    raw_content = response.json().get("response", "{}").strip()
-
-    if raw_content.startswith("```"):
-        raw_content = re.sub(r"^```(?:json)?\s*", "", raw_content)
-        raw_content = re.sub(r"\s*```$", "", raw_content)
-
+    # 2. Try Ollama (Local or remote URL via OLLAMA_BASE_URL)
     try:
-        parsed = json.loads(raw_content)
-    except Exception:
-        match = re.search(r"\{[\s\S]*\}", raw_content)
-        if match:
-            parsed = json.loads(match.group(0))
-        else:
-            parsed = {}
+        url = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
+        response = requests.post(
+            url,
+            json={
+                "model": "gemma3:1b",
+                "prompt": prompt,
+                "stream": False,
+                "format": "json"
+            },
+            timeout=15
+        )
+        if response.ok:
+            raw_content = response.json().get("response", "{}").strip()
+            if raw_content.startswith("```"):
+                raw_content = re.sub(r"^```(?:json)?\s*", "", raw_content)
+                raw_content = re.sub(r"\s*```$", "", raw_content)
+            try:
+                parsed = json.loads(raw_content)
+            except Exception:
+                match = re.search(r"\{[\s\S]*\}", raw_content)
+                parsed = json.loads(match.group(0)) if match else {}
+            return normalize_feedback(parsed)
+    except Exception as e:
+        print(f"Ollama ({OLLAMA_BASE_URL}) unavailable, using smart feedback engine: {e}")
 
-    return normalize_feedback(parsed)
+    # 3. Fallback Smart Evaluation (guarantees SpeakBuddy always works on Render!)
+    return heuristic_evaluation(scenario, question, answer)
 
 # =========================
 # PRACTICE API
@@ -443,6 +534,7 @@ def status():
     return {
         "mongo_connected": sessions_collection is not None,
         "elevenlabs_configured": eleven_client is not None,
+        "groq_configured": bool(GROQ_API_KEY and GROQ_API_KEY.strip()),
         "storage": "mongodb" if sessions_collection is not None else "sqlite_local"
     }
 
@@ -458,3 +550,8 @@ app.mount(
 @app.get("/")
 def home():
     return FileResponse("static/index.html")
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
